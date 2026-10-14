@@ -1,3 +1,5 @@
+# 002_JSON_IR_NORMALIZER.py
+
 import json
 import csv
 import io
@@ -175,6 +177,8 @@ tables = (
     ["table_metadata"]
     .get("tables", [])
 )
+
+print(json.dumps(tables, indent=4))
 
 for table in tables:
 

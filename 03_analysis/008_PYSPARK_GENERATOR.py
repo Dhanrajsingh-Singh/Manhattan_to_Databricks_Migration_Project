@@ -4,9 +4,7 @@
 # ==========================================================
 
 from datetime import datetime
-
 from databricks.sdk import WorkspaceClient
-
 from databricks.sdk.service.serving import (
     ChatMessage,
     ChatMessageRole

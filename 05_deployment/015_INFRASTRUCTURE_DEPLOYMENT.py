@@ -101,6 +101,36 @@ AUDIT_TABLE = (
     "migration.repository.repo_deployment_audit"
 )
 
+# ============================================================
+# 1A. ENVIRONMENT CLUSTER CONFIG
+# ============================================================
+
+CLUSTER_CONFIG = {
+
+    "dev": {
+        "spark_version": "15.4.x-scala2.12",
+        "node_type_id": "Standard_DS3_v2",
+        "num_workers": 1
+    },
+
+    "qa": {
+        "spark_version": "15.4.x-scala2.12",
+        "node_type_id": "Standard_DS3_v2",
+        "num_workers": 2
+    },
+
+    "uat": {
+        "spark_version": "15.4.x-scala2.12",
+        "node_type_id": "Standard_DS3_v2",
+        "num_workers": 4
+    },
+
+    "prod": {
+        "spark_version": "15.4.x-scala2.12",
+        "node_type_id": "Standard_DS3_v2",
+        "num_workers": 8
+    }
+}
 
 # ============================================================
 # 2. AUDIT SCHEMA
@@ -138,6 +168,23 @@ def print_section(title):
     print("\n" + "=" * 70)
     print(title)
     print("=" * 70)
+
+def deploy_workspace_file(
+    source_file,
+    target_file
+):
+    dbutils.fs.cp(
+        source_file,
+        target_file,
+        True
+    )
+
+    print(
+        f"Copied:\n"
+        f"{source_file}\n"
+        f"->\n"
+        f"{target_file}"
+    )
 
 
 # ============================================================
@@ -453,7 +500,17 @@ def discover_deployment_definitions(files):
             "pipeline.json",
             "pipelines.json"
         ):
-            pipeline_candidates.append(file)
+            definition = parse_definition(file["path"])
+
+            resources = definition.get("resources", {})
+            pipelines = resources.get("pipelines", {})
+            if pipelines:
+                pipeline_candidates.append(file)
+            else:
+                print(
+                    f"Skipping empty pipeline definition: "
+                    f"{file['path']}"
+                )
 
         elif name in (
             "permissions.yml",
@@ -853,33 +910,43 @@ def deploy_job(
             "spark_python_task"
         )
 
-        if not spark_task:
-            continue
+        if spark_task:
 
-        file_name = spark_task.get(
-            "python_file"
-        )
-
-        if not file_name:
-            continue
-
-        if "bronze_loader.py" in file_name:
-
-            spark_task["python_file"] = (
-                f"{WORKSPACE_ROOT}/bronze_loader.py"
+            file_name = spark_task.get(
+                "python_file"
             )
 
-        elif "silver_transform.py" in file_name:
+            if file_name:
 
-            spark_task["python_file"] = (
-                f"{WORKSPACE_ROOT}/silver_transform.py"
-            )
+                if "bronze_loader.py" in file_name:
 
-        elif "gold_transform.py" in file_name:
+                    spark_task["python_file"] = (
+                        f"{WORKSPACE_ROOT}/bronze_loader.py"
+                    )
 
-            spark_task["python_file"] = (
-                f"{WORKSPACE_ROOT}/gold_transform.py"
-            )
+                elif "silver_transform.py" in file_name:
+
+                    spark_task["python_file"] = (
+                        f"{WORKSPACE_ROOT}/silver_transform.py"
+                    )
+
+                elif "gold_transform.py" in file_name:
+
+                    spark_task["python_file"] = (
+                        f"{WORKSPACE_ROOT}/gold_transform.py"
+                    )
+
+                elif "migration_generated.py" in file_name:
+
+                    spark_task["python_file"] = (
+                        f"{WORKSPACE_ROOT}/migration_generated.py"
+                    )
+
+        if (
+            "new_cluster" not in task
+            and "existing_cluster_id" not in task
+        ):
+            task["environment_key"] = "default"
 
     print(
         json.dumps(
@@ -887,9 +954,8 @@ def deploy_job(
             indent=2
         )
     )
-    
-    definition["environments"] = [
 
+    definition["environments"] = [
         {
             "environment_key": "default",
             "spec": {
@@ -897,10 +963,6 @@ def deploy_job(
             }
         }
     ]
-
-    for task in definition.get("tasks", []):
-
-        task["environment_key"] = "default"
 
     response = w.api_client.do(
         method="POST",
@@ -1098,6 +1160,9 @@ def deploy_pipeline(
             "pipeline_id": str(pipeline_id),
             "pipeline_name": pipeline_name
         }
+
+    # Force serverless DLT
+    definition["serverless"] = True
 
     print(
         json.dumps(
@@ -1443,7 +1508,13 @@ try:
                 package_path,
                 str(e)
             )
-            raise
+            print(
+                f"Permission deployment failed: {e}"
+            )
+            print(
+                "Continuing deployment..."
+            )
+            continue
 
     # --------------------------------------------------------
     # STEP 7: PIPELINE DEPLOYMENT
